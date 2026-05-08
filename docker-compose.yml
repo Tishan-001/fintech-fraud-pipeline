@@ -1,0 +1,252 @@
+# ============================================================
+#  LankaPay Wallet — Fraud Detection Pipeline
+#  Lambda Architecture Stack
+#  Usage: docker-compose up -d
+# ============================================================
+
+networks:
+  lankapay-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  parquet_data:
+  airflow_logs:
+  airflow_plugins:
+  reports_data:
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.8.0
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://lankapay:lankapay123@postgres:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    PYTHONPATH: /opt/airflow
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - airflow_logs:/opt/airflow/logs
+    - airflow_plugins:/opt/airflow/plugins
+    - parquet_data:/data/warehouse
+    - reports_data:/reports         # ← NEW
+  networks:
+    - lankapay-net
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+
+  # ── 1. Zookeeper ─────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: lankapay-zookeeper
+    hostname: zookeeper
+    networks:
+      - lankapay-net
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── 2. Kafka Broker ──────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: lankapay-kafka
+    hostname: kafka
+    networks:
+      - lankapay-net
+    ports:
+      - "9092:9092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_MS: 7200000
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── 3. Kafka Topic Initialiser (runs once, then exits) ───
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: lankapay-kafka-init
+    networks:
+      - lankapay-net
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo '>>> Creating Kafka topics...' &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic transactions --partitions 3 --replication-factor 1 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic fraud-alerts --partitions 1 --replication-factor 1 &&
+      echo '>>> Topics ready:' &&
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
+
+  # ── 4. PostgreSQL ─────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: lankapay-postgres
+    hostname: postgres
+    networks:
+      - lankapay-net
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: lankapay
+      POSTGRES_PASSWORD: lankapay123
+      POSTGRES_DB: lankapay_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./pg-init.sh:/docker-entrypoint-initdb.d/00-pg-init.sh
+      - ./init_db.sql:/docker-entrypoint-initdb.d/01-init_db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lankapay -d lankapay_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── 5. Spark Master ──────────────────────────────────────
+  spark-master:
+    image: apache/spark:3.5.1
+    container_name: lankapay-spark-master
+    hostname: spark-master
+    user: root
+    networks:
+      - lankapay-net
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_PORT: 8080
+    volumes:
+      - ./spark_jobs:/opt/spark_jobs
+      - parquet_data:/data/warehouse
+      - reports_data:/reports         # ← NEW: Spark can write analytic reports here too
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ── 6. Spark Worker ──────────────────────────────────────
+  spark-worker:
+    image: apache/spark:3.5.1
+    container_name: lankapay-spark-worker
+    hostname: spark-worker
+    user: root
+    networks:
+      - lankapay-net
+    ports:
+      - "8081:8081"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_WEBUI_PORT: 8081
+    volumes:
+      - ./spark_jobs:/opt/spark_jobs
+      - parquet_data:/data/warehouse
+      - reports_data:/reports         # ← NEW
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # ── 7a. Reports volume permission (runs once as root) ──
+  reports-init:
+    image: busybox
+    container_name: lankapay-reports-init
+    user: root
+    command: ["chmod", "777", "/reports"]
+    volumes:
+      - reports_data:/reports
+    networks:
+      - lankapay-net
+
+  # ── 7b. Airflow Init (runs once) ──────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: lankapay-airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --firstname LankaPay \
+          --lastname Admin \
+          --role Admin \
+          --email admin@lankapay.lk \
+          --password admin123 || true
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+      reports-init:
+        condition: service_completed_successfully
+
+  # ── 8. Airflow Webserver ──────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: lankapay-airflow-webserver
+    ports:
+      - "8085:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ── 9. Airflow Scheduler ─────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: lankapay-airflow-scheduler
+    command: scheduler
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+# ─────────────────────────────────────────────────────────────
+# Port summary:
+#   9092  → Kafka
+#   5432  → PostgreSQL  (lankapay / lankapay123 / lankapay_db)
+#   8080  → Spark Master UI
+#   8081  → Spark Worker UI
+#   7077  → Spark cluster
+#   8085  → Airflow UI  (admin / admin123)
+#
+# Volume summary:
+#   postgres_data   → PostgreSQL data directory
+#   parquet_data    → Spark Parquet output + Airflow reads  (/data/warehouse)
+#   reports_data    → Airflow CSV reports + Spark analytics (/reports)
+#   airflow_logs    → Airflow task logs
+#   airflow_plugins → Airflow plugins
+# ─────────────────────────────────────────────────────────────
