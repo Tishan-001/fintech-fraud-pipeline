@@ -7,30 +7,30 @@
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        SPEED LAYER (Real-Time)                      │
-│                                                                     │
-│  [Python Producer] ──► [Kafka: transactions] ──► [Spark Streaming]  │
-│                                                       │        │    │
-│                                              [Fraud] [Clean]        │
-│                                                 │        │          │
-│                                          [PostgreSQL] [Parquet]     │
-│                                          fraud_alerts  /data/       │
-│                                                        warehouse/   │
-└─────────────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────────┐
-│                       BATCH LAYER (Every 6h)                        │
-│                                                                     │
-│  [Airflow DAG] ──► validate ──► ingress ──► validate ──► report     │
-│                                                    │                │
-│                                          [/reports/*.csv]           │
-│                                          [reconciliation_log]       │
-└─────────────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────────┐
-│                    ANALYTIC LAYER (On-demand)                       │
-│                                                                     │
-│  [generate_analytic_report.py] ──► fraud_by_merchant.png + .csv     │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        SPEED LAYER (Real-Time)                               │
+│                                                                              │ 
+│  [Python Producer] ──► [Kafka: transactions] ──► [Spark Streaming]           │
+│                                                       │        │             │
+│                                                    [Fraud] [Clean]           │
+│                                                       │        │             │
+│                                                  [PostgreSQL] [Parquet]      │
+│                                                   fraud_alerts  /data/       │
+│                                                               warehouse/     │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                       BATCH LAYER (Every 6h)                                 │
+│                                                                              │
+│  [Airflow DAG] ──► validate ──► ingress ──► validate ──► report              │
+│                                                            │                 │
+│                                                   [/reports/*.csv]           │
+│                                                 [reconciliation_log]         │
+└──────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    ANALYTIC LAYER (On-demand)                                │
+│                                                                              │
+│  [generate_analytic_report.py] ──► fraud_by_merchant.png + .csv              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
