@@ -1,0 +1,22 @@
+
+╔══════════════════════════════════════════════════════════════╗
+  LankaPay — Fraud Attempts by Merchant Category
+  ─────────────────────────────────────────────────────────────
+  Total fraud incidents : 43
+  Total fraud amount    : LKR 9,267,188.30
+  ─────────────────────────────────────────────────────────────
+  Category                Count    Amount (LKR)     Avg (LKR)
+  ──────────────────────  ──────  ──────────────  ────────────
+  MULTIPLE                    6  LKR        0.00  LKR      0.00
+  entertainment               6  LKR 1,510,935.94  LKR 251,822.66
+  online_shopping             5  LKR 1,317,058.13  LKR 263,411.63
+  groceries                   5  LKR 1,275,946.23  LKR 255,189.25
+  electronics                 5  LKR 1,112,056.89  LKR 222,411.38
+  healthcare                  5  LKR 1,593,505.05  LKR 318,701.01
+  clothing                    4  LKR 1,214,008.64  LKR 303,502.16
+  travel                      3  LKR  466,526.67  LKR 155,508.89
+  bills                       2  LKR  450,845.68  LKR 225,422.84
+  restaurants                 2  LKR  326,305.07  LKR 163,152.54
+  ─────────────────────────────────────────────────────────────
+  Highest risk category : MULTIPLE  (6 incidents)
+╚══════════════════════════════════════════════════════════════╝

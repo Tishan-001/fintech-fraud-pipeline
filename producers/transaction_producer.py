@@ -54,19 +54,19 @@ def make_normal_transaction(user_id: str) -> dict:
         "user_id":           user_id,
         "timestamp":         datetime.now(timezone.utc).isoformat(),
         "merchant_category": random.choice(MERCHANT_CATEGORIES),
-        "amount":            round(random.uniform(5.0, 499.0), 2),
+        "amount":            round(random.uniform(500.0, 49900.0), 2),
         "location":          "LK",
     }
 
 
 def make_high_value_fraud(user_id: str) -> dict:
-    """Amount > $5000 — triggers Rule 1 in Spark."""
+    """Amount > LKR 50,000 — triggers Rule 1 in Spark."""
     return {
         "txn_id":            str(uuid.uuid4()),
         "user_id":           user_id,
         "timestamp":         datetime.now(timezone.utc).isoformat(),
         "merchant_category": random.choice(MERCHANT_CATEGORIES),
-        "amount":            round(random.uniform(5001.0, 15000.0), 2),
+        "amount":            round(random.uniform(50001.0, 500000.0), 2),
         "location":          random.choice(FOREIGN_COUNTRIES),
     }
 
@@ -85,7 +85,7 @@ def make_impossible_travel_fraud(user_id: str) -> list[dict]:
         "user_id":           user_id,
         "timestamp":         ts_now,
         "merchant_category": random.choice(MERCHANT_CATEGORIES),
-        "amount":            round(random.uniform(50.0, 800.0), 2),
+        "amount":            round(random.uniform(5000.0, 45000.0), 2),
         "location":          "LK",
     }
     txn2 = {
@@ -93,7 +93,7 @@ def make_impossible_travel_fraud(user_id: str) -> list[dict]:
         "user_id":           user_id,
         "timestamp":         ts_now,          # same timestamp window
         "merchant_category": random.choice(MERCHANT_CATEGORIES),
-        "amount":            round(random.uniform(50.0, 800.0), 2),
+        "amount":            round(random.uniform(5000.0, 45000.0), 2),
         "location":          foreign,
     }
     return [txn1, txn2]
@@ -102,7 +102,7 @@ def make_impossible_travel_fraud(user_id: str) -> list[dict]:
 def log_normal(txn: dict):
     print(
         f"  [NORMAL]        {txn['user_id']} | "
-        f"${txn['amount']:>8.2f} | "
+        f"LKR {txn['amount']:>10.2f} | "
         f"{txn['location']:<4} | "
         f"{txn['merchant_category']}"
     )
@@ -111,7 +111,7 @@ def log_normal(txn: dict):
 def log_fraud(txn: dict, fraud_type: str):
     print(
         f"  [FRAUD_INJECT]  {txn['user_id']} | "
-        f"${txn['amount']:>8.2f} | "
+        f"LKR {txn['amount']:>10.2f} | "
         f"{txn['location']:<4} | "
         f"{txn['merchant_category']:<18} | ⚠  {fraud_type}"
     )
@@ -155,7 +155,7 @@ def main():
                 # ── Fraud type 1: High-value spike (~2.5%) ─
                 txn = make_high_value_fraud(user_id)
                 producer.send(TOPIC, key=user_id, value=txn)
-                log_fraud(txn, "HIGH_VALUE (amount > $5000)")
+                log_fraud(txn, "HIGH_VALUE (amount > LKR 50,000)")
                 total_sent += 1
                 fraud_count += 1
 

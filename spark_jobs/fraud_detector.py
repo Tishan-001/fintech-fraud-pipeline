@@ -9,7 +9,7 @@
    - Parquet     → /data/warehouse/    (clean transactions)
 
  Fraud Rules:
-   Rule 1 — High Value:       amount > 5000
+   Rule 1 — High Value:       amount > LKR 50,000
    Rule 2 — Impossible Travel: same user_id, 2 different locations
                                 within a 10-minute event-time window
 
@@ -46,7 +46,7 @@ POSTGRES_PROPS    = {
 }
 
 PARQUET_OUTPUT    = "/data/warehouse"
-FRAUD_THRESHOLD   = 5000.0
+FRAUD_THRESHOLD   = 50000.0   # LKR
 TRAVEL_WINDOW_MIN = "10 minutes"
 WATERMARK_DELAY   = "10 minutes"
 
@@ -142,7 +142,7 @@ def main():
     watermarked = parsed.withWatermark("timestamp", WATERMARK_DELAY)
 
     # ──────────────────────────────────────────────────────────
-    # RULE 1 — High-Value Transaction (amount > $5000)
+    # RULE 1 — High-Value Transaction (amount > LKR 50,000)
     # Simple filter, no windowing needed.
     # ──────────────────────────────────────────────────────────
     high_value_fraud = watermarked \
@@ -172,7 +172,7 @@ def main():
         )
 
     # ──────────────────────────────────────────────────────────
-    # CLEAN transactions — exclude high-value fraud
+    # CLEAN transactions — exclude high-value fraud (> LKR 50,000)
     # (impossible travel can't be excluded at row level here,
     #  Airflow reconciliation handles that distinction)
     # ──────────────────────────────────────────────────────────

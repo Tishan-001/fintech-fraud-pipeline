@@ -30,7 +30,7 @@ x-airflow-common: &airflow-common
     - airflow_logs:/opt/airflow/logs
     - airflow_plugins:/opt/airflow/plugins
     - parquet_data:/data/warehouse
-    - reports_data:/reports         # ← NEW
+    - reports_data:/reports         
   networks:
     - lankapay-net
   depends_on:
@@ -143,7 +143,7 @@ services:
     volumes:
       - ./spark_jobs:/opt/spark_jobs
       - parquet_data:/data/warehouse
-      - reports_data:/reports         # ← NEW: Spark can write analytic reports here too
+      - reports_data:/reports       
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 15s
@@ -168,7 +168,7 @@ services:
     volumes:
       - ./spark_jobs:/opt/spark_jobs
       - parquet_data:/data/warehouse
-      - reports_data:/reports         # ← NEW
+      - reports_data:/reports         
     depends_on:
       spark-master:
         condition: service_healthy
@@ -237,16 +237,9 @@ services:
 # ─────────────────────────────────────────────────────────────
 # Port summary:
 #   9092  → Kafka
-#   5432  → PostgreSQL  (lankapay / lankapay123 / lankapay_db)
+#   5432  → PostgreSQL
 #   8080  → Spark Master UI
 #   8081  → Spark Worker UI
 #   7077  → Spark cluster
 #   8085  → Airflow UI  (admin / admin123)
-#
-# Volume summary:
-#   postgres_data   → PostgreSQL data directory
-#   parquet_data    → Spark Parquet output + Airflow reads  (/data/warehouse)
-#   reports_data    → Airflow CSV reports + Spark analytics (/reports)
-#   airflow_logs    → Airflow task logs
-#   airflow_plugins → Airflow plugins
 # ─────────────────────────────────────────────────────────────

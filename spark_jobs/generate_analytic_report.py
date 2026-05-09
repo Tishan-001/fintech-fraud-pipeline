@@ -115,126 +115,131 @@ def generate_chart(rows: List[Dict], path: Path) -> None:
         print("[WARN] No data to chart.")
         return
 
-    categories   = [r["merchant_category"].replace("_", "\n") for r in rows]
-    fraud_counts = [int(r["fraud_count"])         for r in rows]
-    hv_counts    = [int(r["high_value_count"])     for r in rows]
-    travel_counts= [int(r["travel_count"])         for r in rows]
-    totals       = [float(r["total_fraud_amount"]) for r in rows]
+    categories    = [r["merchant_category"].replace("_", " ").title() for r in rows]
+    fraud_counts  = [int(r["fraud_count"])         for r in rows]
+    hv_counts     = [int(r["high_value_count"])     for r in rows]
+    travel_counts = [int(r["travel_count"])         for r in rows]
+    totals        = [float(r["total_fraud_amount"]) for r in rows]
 
-    x      = np.arange(len(categories))
-    width  = 0.55
+    x     = np.arange(len(categories))
+    width = 0.52
 
     # ── Colour palette ────────────────────────────────────────
-    COLOR_BG       = "#E6EDF3"
-    COLOR_GRID     = "#21262D"
-    COLOR_HV       = "#E05C4B"   # high-value — red-orange
-    COLOR_TRAVEL   = "#F0A500"   # impossible travel — amber
-    COLOR_TEXT     = "#0D1117"
-    COLOR_SUBTEXT  = "#8B949E"
-    COLOR_ACCENT   = "#58A6FF"
+    COLOR_BG      = "#FAFAFA"
+    COLOR_PANEL   = "#FFFFFF"
+    COLOR_GRID    = "#E0E0E0"
+    COLOR_BORDER  = "#CCCCCC"
+    COLOR_HV      = "#E05C4B"   # high-value  — red-orange
+    COLOR_TRAVEL  = "#F0A500"   # impossible travel — amber
+    COLOR_ACCENT  = "#3A7BD5"   # total amount bars — blue
+    COLOR_TEXT    = "#1A1A2E"
+    COLOR_SUB     = "#555577"
 
-    fig, axes = plt.subplots(
-        1, 2,
-        figsize=(16, 7),
+    # ── Figure: 2 rows × 1 column, centred ───────────────────
+    fig, (ax1, ax2) = plt.subplots(
+        2, 1,
+        figsize=(13, 12),
         facecolor=COLOR_BG,
-        gridspec_kw={"width_ratios": [2, 1]},
     )
-    fig.subplots_adjust(wspace=0.35, left=0.07, right=0.96, top=0.82, bottom=0.14)
+    fig.subplots_adjust(
+        left=0.10, right=0.90,   # equal margins → centred
+        top=0.88,  bottom=0.07,
+        hspace=0.52,
+    )
 
-    # ── LEFT: Stacked bar — fraud count by type ───────────────
-    ax = axes[0]
-    ax.set_facecolor(COLOR_BG)
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    bars_hv     = ax.bar(x, hv_counts,     width, label="High Value",         color=COLOR_HV,     zorder=3)
-    bars_travel = ax.bar(x, travel_counts, width, label="Impossible Travel",   color=COLOR_TRAVEL, bottom=hv_counts, zorder=3)
+    # ── Figure-level header ───────────────────────────────────
+    fig.text(
+        0.5, 0.955,
+        "LankaPay Wallet — Fraud Detection Analytics",
+        ha="center", va="top",
+        color=COLOR_TEXT, fontsize=16, fontweight="bold",
+    )
+    fig.text(
+        0.5, 0.924,
+        f"Source: fraud_alerts  ·  Generated: {generated_at}",
+        ha="center", va="top",
+        color=COLOR_SUB, fontsize=9,
+    )
+    fig.add_artist(
+        plt.Line2D(
+            [0.10, 0.90], [0.913, 0.913],
+            transform=fig.transFigure,
+            color=COLOR_BORDER, linewidth=1.0,
+        )
+    )
 
-    # Total label on top of each bar
+    # ── ROW 1: Stacked bar — Fraud incidents by type ──────────
+    ax1.set_facecolor(COLOR_PANEL)
+    ax1.bar(x, hv_counts,     width, color=COLOR_HV,     zorder=3, label="High Value (>LKR 50,000)")
+    ax1.bar(x, travel_counts, width, color=COLOR_TRAVEL,  zorder=3, label="Impossible Travel",
+            bottom=hv_counts)
+
+    # Total count label on top of each bar
     for i, total in enumerate(fraud_counts):
-        ax.text(
-            x[i], total + 0.4,
+        ax1.text(
+            x[i], total + 0.15,
             str(total),
             ha="center", va="bottom",
             color=COLOR_TEXT, fontsize=9, fontweight="bold",
         )
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(categories, color=COLOR_SUBTEXT, fontsize=8.5)
-    ax.set_ylabel("Fraud Incident Count", color=COLOR_SUBTEXT, fontsize=10)
-    ax.set_title("Fraud Incidents by Merchant Category", color=COLOR_TEXT, fontsize=13, fontweight="bold", pad=10)
-    ax.tick_params(colors=COLOR_SUBTEXT)
-    ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(categories, color=COLOR_SUB, fontsize=9, ha="center")
+    ax1.set_ylabel("Fraud Incident Count", color=COLOR_SUB, fontsize=10, labelpad=10)
+    ax1.set_title("Fraud Incidents by Merchant Category",
+                  color=COLOR_TEXT, fontsize=12, fontweight="bold", pad=12)
+    ax1.tick_params(axis="both", colors=COLOR_SUB, length=0)
+    ax1.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
+    ax1.set_xlim(-0.6, len(categories) - 0.4)
+    ax1.set_ylim(0, max(fraud_counts) * 1.18 if fraud_counts else 1)
 
-    for spine in ax.spines.values():
-        spine.set_edgecolor(COLOR_GRID)
-    ax.set_axisbelow(True)
-    ax.yaxis.grid(True, color=COLOR_GRID, linewidth=0.8, zorder=0)
-    ax.xaxis.grid(False)
+    for spine in ax1.spines.values():
+        spine.set_edgecolor(COLOR_BORDER)
+    ax1.set_axisbelow(True)
+    ax1.yaxis.grid(True, color=COLOR_GRID, linewidth=0.7, zorder=0)
+    ax1.xaxis.grid(False)
 
-    legend = ax.legend(
+    ax1.legend(
         handles=[
-            mpatches.Patch(color=COLOR_HV,     label="High Value (>$5k)"),
+            mpatches.Patch(color=COLOR_HV,     label="High Value (>LKR 50,000)"),
             mpatches.Patch(color=COLOR_TRAVEL, label="Impossible Travel"),
         ],
-        facecolor="#161B22", edgecolor=COLOR_GRID,
+        facecolor=COLOR_BG, edgecolor=COLOR_BORDER,
         labelcolor=COLOR_TEXT, fontsize=9,
-        loc="upper right",
+        loc="upper right", framealpha=0.9,
     )
 
-    # ── RIGHT: Horizontal bar — total fraud amount ($) ────────
-    ax2 = axes[1]
-    ax2.set_facecolor(COLOR_BG)
+    # ── ROW 2: Vertical bar — Total fraud amount (LKR) ────────
+    ax2.set_facecolor(COLOR_PANEL)
+    bars = ax2.bar(x, totals, width, color=COLOR_ACCENT, zorder=3, alpha=0.88)
 
-    # Gradient-like effect with alpha variation
-    bar_colors = [COLOR_ACCENT] * len(categories)
-    hbars = ax2.barh(x, totals, height=width, color=bar_colors, zorder=3, alpha=0.85)
-
-    # Amount labels inside/outside bars
+    # LKR amount label on top of each bar
     max_total = max(totals) if totals else 1
     for i, val in enumerate(totals):
-        label_x = val + max_total * 0.02
         ax2.text(
-            label_x, x[i],
-            f"${val:,.0f}",
-            va="center", color=COLOR_TEXT, fontsize=8,
+            x[i], val + max_total * 0.015,
+            f"LKR\n{val:,.0f}",
+            ha="center", va="bottom",
+            color=COLOR_TEXT, fontsize=7.5, fontweight="bold", linespacing=1.4,
         )
 
-    ax2.set_yticks(x)
-    ax2.set_yticklabels(categories, color=COLOR_SUBTEXT, fontsize=8.5)
-    ax2.set_xlabel("Total Fraud Amount (USD)", color=COLOR_SUBTEXT, fontsize=10)
-    ax2.set_title("Total Fraud Amount ($)", color=COLOR_TEXT, fontsize=13, fontweight="bold", pad=10)
-    ax2.tick_params(colors=COLOR_SUBTEXT)
-    ax2.xaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"${v:,.0f}"))
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(categories, color=COLOR_SUB, fontsize=9, ha="center")
+    ax2.set_ylabel("Total Fraud Amount (LKR)", color=COLOR_SUB, fontsize=10, labelpad=10)
+    ax2.set_title("Total Fraud Amount by Merchant Category",
+                  color=COLOR_TEXT, fontsize=12, fontweight="bold", pad=12)
+    ax2.tick_params(axis="both", colors=COLOR_SUB, length=0)
+    ax2.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: f"LKR {v:,.0f}"))
+    ax2.set_xlim(-0.6, len(categories) - 0.4)
+    ax2.set_ylim(0, max_total * 1.22)
 
     for spine in ax2.spines.values():
-        spine.set_edgecolor(COLOR_GRID)
+        spine.set_edgecolor(COLOR_BORDER)
     ax2.set_axisbelow(True)
-    ax2.xaxis.grid(True, color=COLOR_GRID, linewidth=0.8, zorder=0)
-    ax2.yaxis.grid(False)
-    ax2.invert_yaxis()
-
-    # ── Figure-level header ───────────────────────────────────
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    fig.text(
-        0.5, 0.95,
-        "LankaPay Wallet — Fraud Detection Analytics",
-        ha="center", va="top",
-        color=COLOR_TEXT, fontsize=15, fontweight="bold",
-    )
-    fig.text(
-        0.5, 0.905,
-        f"Source: fraud_alerts table  ·  Generated: {generated_at}",
-        ha="center", va="top",
-        color=COLOR_SUBTEXT, fontsize=9,
-    )
-
-    # Thin accent line under the header
-    fig.add_artist(
-        plt.Line2D(
-            [0.07, 0.96], [0.895, 0.895],
-            transform=fig.transFigure,
-            color=COLOR_GRID, linewidth=0.8,
-        )
-    )
+    ax2.yaxis.grid(True, color=COLOR_GRID, linewidth=0.7, zorder=0)
+    ax2.xaxis.grid(False)
 
     plt.savefig(path, dpi=150, bbox_inches="tight", facecolor=COLOR_BG)
     plt.close()
@@ -257,17 +262,17 @@ def print_summary(rows: List[Dict]) -> None:
   LankaPay — Fraud Attempts by Merchant Category
   ─────────────────────────────────────────────────────────────
   Total fraud incidents : {total_incidents:,}
-  Total fraud amount    : ${total_amount:,.2f}
+  Total fraud amount    : LKR {total_amount:,.2f}
   ─────────────────────────────────────────────────────────────
-  {"Category":<22} {"Count":>6}  {"Amount":>12}  {"Avg":>10}
-  {"─"*22}  {"─"*6}  {"─"*12}  {"─"*10}"""
+  {"Category":<22} {"Count":>6}  {"Amount (LKR)":>14}  {"Avg (LKR)":>12}
+  {"─"*22}  {"─"*6}  {"─"*14}  {"─"*12}"""
 
     for r in rows:
         summary += (
             f"\n  {r['merchant_category']:<22} "
             f"{int(r['fraud_count']):>6}  "
-            f"${float(r['total_fraud_amount']):>11,.2f}  "
-            f"${float(r['avg_fraud_amount']):>9,.2f}"
+            f"LKR {float(r['total_fraud_amount']):>11,.2f}  "
+            f"LKR {float(r['avg_fraud_amount']):>9,.2f}"
         )
 
     summary += f"""

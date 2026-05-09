@@ -1,0 +1,11 @@
+merchant_category,fraud_count,total_fraud_amount,avg_fraud_amount,high_value_count,travel_count
+MULTIPLE,6,0.00,0.00,0,6
+entertainment,6,1510935.94,251822.66,6,0
+online_shopping,5,1317058.13,263411.63,5,0
+groceries,5,1275946.23,255189.25,5,0
+electronics,5,1112056.89,222411.38,5,0
+healthcare,5,1593505.05,318701.01,5,0
+clothing,4,1214008.64,303502.16,4,0
+travel,3,466526.67,155508.89,3,0
+bills,2,450845.68,225422.84,2,0
+restaurants,2,326305.07,163152.54,2,0

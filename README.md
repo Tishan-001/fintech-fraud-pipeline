@@ -53,12 +53,13 @@
 
 ```
 fintech-fraud-pipeline/
-├── docker-compose.yml               # Full stack — 9 services
+├── docker-compose.yml               # Full stack — 11 services
 ├── pg-init.sh                       # Creates airflow DB on first start
 ├── init_db.sql                      # fraud_alerts + reconciliation_log tables
 │
 ├── producers/
-│   └── transaction_producer.py      # Synthetic Kafka transaction generator
+│   ├── transaction_producer.py      # Synthetic Kafka transaction generator
+│   └── fraud_alert_watcher.py       # Real-time fraud alert console monitor
 │
 ├── spark_jobs/
 │   ├── fraud_detector.py            # Spark Structured Streaming job
@@ -82,12 +83,12 @@ fintech-fraud-pipeline/
 ### Prerequisites
 - Docker Desktop ≥ 4.x
 - Docker Compose v2
-- Python 3.9+ with `pip` (for the producer, run on host)
+- Python 3.9+ with `pip` (for host-side scripts)
 
 ### 1 — Clone & Start the Stack
 
 ```bash
-git clone https://github.com/Tishan-001/fintech-fraud-pipeline.git
+git clone https://github.com/<your-username>/fintech-fraud-pipeline.git
 cd fintech-fraud-pipeline
 docker-compose up -d
 ```
@@ -102,7 +103,7 @@ All containers should show `healthy` or `exited (0)` (for one-shot init containe
 
 ### 2 — Start the Kafka Producer
 
-In a separate terminal:
+Open **Terminal 1**:
 
 ```bash
 pip install kafka-python
@@ -111,12 +112,45 @@ python producers/transaction_producer.py
 
 You'll see live output:
 ```
-  [NORMAL]        U1008 |    $234.50 | LK   | groceries
-  [FRAUD_INJECT]  U1013 |  $8,742.00 | RU   | electronics    | ⚠  HIGH_VALUE
-  [FRAUD_INJECT]  U1005 |    $312.40 | LK   | travel         | ⚠  IMPOSSIBLE_TRAVEL → LK then CN
+  [NORMAL]        U1008 |  LKR   23,450.00 | LK   | groceries
+  [FRAUD_INJECT]  U1013 |  LKR  274,200.00 | RU   | electronics    | ⚠  HIGH_VALUE (amount > LKR 50,000)
+  [FRAUD_INJECT]  U1005 |  LKR   31,240.00 | LK   | travel         | ⚠  IMPOSSIBLE_TRAVEL → LK then CN
 ```
 
-### 3 — Submit the Spark Fraud Detector
+### 3 — Start the Real-Time Fraud Alert Watcher
+
+Open **Terminal 2** — runs alongside the producer and fires alerts within 5 seconds of Spark writing to PostgreSQL:
+
+```bash
+pip install psycopg2-binary
+python producers/fraud_alert_watcher.py --local
+```
+
+When fraud is detected you will see:
+
+```
+══════════════════════════════════════════════════════════════
+  ⚠  FRAUD ALERT  —  HIGH-VALUE TRANSACTION DETECTED  💸
+══════════════════════════════════════════════════════════════
+  Alert ID       : 42
+  User           : U1013
+  Fraud Type     : HIGH_VALUE
+  Amount         : LKR 274,200.00
+  Location       : RU
+  Merchant Cat.  : electronics
+  Event Time     : 2026-05-08 13:22:11+00:00
+  Detected At    : 2026-05-08 13:22:14+00:00
+══════════════════════════════════════════════════════════════
+```
+
+Between alerts the watcher prints a live heartbeat:
+```
+  [13:22:45]  Watching...  (alerts fired so far: 3)
+```
+
+### 4 — Submit the Spark Fraud Detector
+
+Open **Terminal 3**:
 
 ```bash
 docker exec lankapay-spark-master \
@@ -130,7 +164,7 @@ Spark will begin writing:
 - Fraud transactions → PostgreSQL `fraud_alerts`
 - Clean transactions → `/data/warehouse/date=YYYY-MM-DD/` (Parquet)
 
-### 4 — Trigger the Airflow Reconciliation DAG
+### 5 — Trigger the Airflow Reconciliation DAG
 
 Open **http://localhost:8085** — login: `admin / admin123`
 
@@ -138,9 +172,9 @@ Open **http://localhost:8085** — login: `admin / admin123`
 2. Toggle it **ON**
 3. Click ▶ **Trigger DAG**
 
-The DAG runs 5 tasks in sequence and writes a reconciliation CSV to `/reports/`.
+The DAG runs 6 tasks in sequence. The first task (`check_and_alert_fraud`) immediately prints a fraud bulletin for the current window before the reconciliation work begins.
 
-### 5 — Generate the Analytic Report
+### 6 — Generate the Analytic Report
 
 ```bash
 docker exec lankapay-spark-master \
@@ -155,13 +189,26 @@ docker cp lankapay-spark-master:/reports/fraud_by_merchant.png ./reports/
 
 ---
 
+## 🚨 Fraud Alerting — Two Layers
+
+The pipeline provides alerts at two different timescales:
+
+| Method | Latency | Where to see it |
+|---|---|---|
+| `fraud_alert_watcher.py` | **~5 seconds** after fraud hits PostgreSQL | Terminal running the watcher |
+| Airflow `t0: check_and_alert_fraud` | **Every 6 hours** — full window bulletin | Airflow UI → task log |
+
+The watcher is for **immediate operational response**. The Airflow `t0` bulletin is a **structured audit record** of all fraud in a 6-hour period, sorted by amount, preserved permanently in Airflow task log history.
+
+---
+
 ## 🔍 Fraud Detection Rules
 
 ### Rule 1 — High-Value Transaction
 ```python
-df.filter(col("amount") > 5000)
+df.filter(col("amount") > 50000)   # LKR 50,000
 ```
-Any single transaction exceeding **$5,000** is immediately flagged as `HIGH_VALUE` and written to PostgreSQL.
+Any single transaction exceeding **LKR 50,000** is immediately flagged as `HIGH_VALUE` and written to PostgreSQL.
 
 ### Rule 2 — Impossible Travel
 ```python
@@ -183,7 +230,7 @@ CREATE TABLE fraud_alerts (
     user_id           VARCHAR(20)    NOT NULL,
     timestamp         TIMESTAMPTZ    NOT NULL,
     merchant_category VARCHAR(50),
-    amount            NUMERIC(12, 2) NOT NULL,
+    amount            NUMERIC(12, 2) NOT NULL,   -- stored in LKR
     location          VARCHAR(10),
     fraud_type        VARCHAR(50)    NOT NULL,   -- HIGH_VALUE | IMPOSSIBLE_TRAVEL
     detected_at       TIMESTAMPTZ    DEFAULT NOW()
@@ -194,9 +241,9 @@ CREATE TABLE reconciliation_log (
     id                   SERIAL PRIMARY KEY,
     period_start         TIMESTAMPTZ   NOT NULL,
     period_end           TIMESTAMPTZ   NOT NULL,
-    total_ingress_amount NUMERIC(18,2),
-    validated_amount     NUMERIC(18,2),
-    fraud_amount         NUMERIC(18,2),
+    total_ingress_amount NUMERIC(18,2),           -- stored in LKR
+    validated_amount     NUMERIC(18,2),           -- stored in LKR
+    fraud_amount         NUMERIC(18,2),           -- stored in LKR
     fraud_rate_pct       NUMERIC(6,2),
     created_at           TIMESTAMPTZ   DEFAULT NOW()
 );
@@ -209,6 +256,8 @@ CREATE TABLE reconciliation_log (
 Schedule: `0 */6 * * *` (every 6 hours)
 
 ```
+t0: check_and_alert_fraud          ← fraud bulletin for the window
+        ↓
 t1: validate_parquet_exists        ← checks /data/warehouse for partitions
         ↓
 t2: calculate_total_ingress        ← Parquet clean txns + PostgreSQL fraud
@@ -217,19 +266,44 @@ t3: calculate_validated_amount     ← secondary quality pass on Parquet
         ↓
 t4: generate_reconciliation_report ← writes CSV + inserts to reconciliation_log
         ↓
-t5: log_completion                 ← prints summary to Airflow task log
+t5: log_completion                 ← prints summary including alert count
 ```
 
-Sample output:
+Sample `t0` output when fraud is detected (visible in Airflow task log):
 ```
-╔══════════════════════════════════════════════════════════════╗
-  LankaPay Reconciliation — Run Complete
-  Window  : 2026-05-08 18:00 → 00:00 UTC
-  Total Ingress     : $   75,315.55
-  Validated Amount  : $   58,636.30
-  Fraud Amount      : $   16,679.25   (22.15% fraud rate)
+================================================================
+  *** FRAUD ALERT BULLETIN — 3 INCIDENT(S) DETECTED ***
+  Window             : 2026-05-08 12:00 -> 18:00 UTC
+  Total Fraud Amount : LKR 1,243,500.00
+  High-Value         : 3 incident(s)  (> LKR 50,000)
+  Impossible Travel  : 0 incident(s)
+================================================================
+
+  Alert 1/3  [HIGH-VALUE > LKR 50,000]
+  ----------------------------------------------------------------
+  Alert ID      : 42
+  User          : U1013
+  Amount        : LKR 274,200.00
+  Location      : RU
+  Merchant Cat. : electronics
+  Event Time    : 2026-05-08 13:22:11+00:00
+  Detected At   : 2026-05-08 13:22:14+00:00
+```
+
+Sample `t5` completion summary:
+```
+================================================================
+  LankaPay Reconciliation -- Run Complete
+  Window  : 2026-05-08 18:00 -> 00:00 UTC
+  ----------------------------------------------------------------
+  Total Ingress     : LKR  7,531,550.00
+  Validated Amount  : LKR  5,863,630.00
+  Fraud Amount      : LKR  1,667,920.00   (22.15% fraud rate)
+  ----------------------------------------------------------------
+  Fraud Alerts Fired : 3 incident(s)  /  LKR 1,243,500.00 total
+  ----------------------------------------------------------------
   Report saved to   : /reports/reconciliation_20260508_1800.csv
-╚══════════════════════════════════════════════════════════════╝
+================================================================
 ```
 
 ---
@@ -241,7 +315,7 @@ Sample output:
 | Airflow UI | http://localhost:8085 | `admin / admin123` |
 | Spark Master UI | http://localhost:8080 | — |
 | Spark Worker UI | http://localhost:8081 | — |
-| PostgreSQL | `localhost:5432` | `lankapay / lankapay123 / lankapay_db` |
+| PostgreSQL | `localhost:5432` | `lankapay_db` |
 | Kafka | `localhost:9092` | — |
 
 ---
@@ -252,10 +326,11 @@ Key constants are defined at the top of each file for easy tuning:
 
 | File | Variable | Default | Description |
 |---|---|---|---|
-| `fraud_detector.py` | `FRAUD_THRESHOLD` | `5000.0` | High-value rule threshold ($) |
+| `fraud_detector.py` | `FRAUD_THRESHOLD` | `50000.0` | High-value rule threshold (LKR) |
 | `fraud_detector.py` | `TRAVEL_WINDOW_MIN` | `"10 minutes"` | Impossible travel window |
 | `fraud_detector.py` | `WATERMARK_DELAY` | `"10 minutes"` | Late data tolerance |
 | `transaction_producer.py` | `SLEEP_BETWEEN_MESSAGES` | `0.5` | Seconds between messages |
+| `fraud_alert_watcher.py` | `POLL_INTERVAL_SEC` | `5` | Watcher polling frequency (seconds) |
 | `reconciliation_dag.py` | `schedule_interval` | `0 */6 * * *` | DAG run frequency |
 
 ---
@@ -276,6 +351,10 @@ docker-compose down -v
 
 **Event Time vs Processing Time** — Spark uses the `timestamp` field embedded in the Kafka JSON payload as event time, not Spark's ingestion time. Combined with `withWatermark`, this ensures late-arriving messages (e.g. from network delays) are still correctly assigned to their original 10-minute window rather than being silently dropped or misclassified.
 
-**Kafka Partitioning by `user_id`** — The producer sets `user_id` as the Kafka message key. This guarantees all transactions from the same user land on the same partition, which is critical for Spark's stateful impossible-travel groupBy to see both legs of the trip in the same task.
+**Kafka Partitioning by `user_id`** — The producer sets `user_id` as the Kafka message key. This guarantees all transactions from the same user land on the same partition, which is critical for Spark's stateful impossible-travel `groupBy` to see both legs of the trip in the same task.
+
+**Dual-sink routing** — Fraud alerts (low volume, high importance) go to PostgreSQL for ACID-guaranteed persistence and immediate queryability. Clean transactions (high volume) go to date-partitioned Parquet, enabling efficient predicate pushdown when Airflow reads a single 6-hour window.
 
 **Lambda Architecture separation** — The speed layer (Spark) optimises for latency; the batch layer (Airflow) optimises for completeness and correctness. The reconciliation DAG deliberately re-reads both the Parquet store and the PostgreSQL fraud table to produce a unified picture that neither layer could produce alone.
+
+**Two-tier alerting** — The `fraud_alert_watcher.py` provides operational response within seconds by polling PostgreSQL continuously. The Airflow `t0` task provides a structured, auditable fraud bulletin every 6 hours that is preserved in Airflow's task log history alongside the reconciliation numbers.
