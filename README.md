@@ -87,7 +87,7 @@ fintech-fraud-pipeline/
 ### 1 — Clone & Start the Stack
 
 ```bash
-git clone https://github.com/<your-username>/fintech-fraud-pipeline.git
+git clone https://github.com/Tishan-001/fintech-fraud-pipeline.git
 cd fintech-fraud-pipeline
 docker-compose up -d
 ```
